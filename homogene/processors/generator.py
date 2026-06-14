@@ -91,27 +91,32 @@ class Generator(Processor):
             "df": f"[{len(self.df)} rows x {len(self.df.columns)} columns]",
         }, indent=2)
 
-    def _run_row(self, row: pd.Series) -> Any:
-        """Process a single row and return the model output.
+    def _run_row(self, row: pd.Series) -> tuple[Any, float | None]:
+        """Process a single row and return the model output with its cost.
 
         Args:
             row: A single `pd.DataFrame` row as a `pd.Series`.
 
         Returns:
-            A string if `output_schema` is `None`, otherwise an instance of `output_schema`.
+            A tuple of `(output, cost)` where `output` is a string or `output_schema` instance,
+            and `cost` is in USD or `None` if unavailable.
         """
         prompt = Prompt(self.instruction, _build_context(self.columns, row))
 
         if self.output_schema is not None:
-            return self.model.generate_structured(
+            return self.model._generate_structured(
                 system_prompt=prompt.system,
                 user_prompt=prompt.user,
                 response_format=self.output_schema,
             )
-        return self.model.generate(
+        return self.model._generate(
             system_prompt=prompt.system,
             user_prompt=prompt.user,
         )
+
+    def _get_prompt_length(self, row: pd.Series) -> int:
+        prompt = Prompt(self.instruction, _build_context(self.columns, row))
+        return len(prompt.system) + len(prompt.user)
 
     def get_prompt(self, i: int = 0) -> Prompt:
         """Return the `Prompt` for the row at position `i`.

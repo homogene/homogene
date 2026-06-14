@@ -16,7 +16,7 @@ class ConcreteProcessor(Processor):
     OUTPUT_COL = "value"
 
     def _run_row(self, row: pd.Series):
-        return row.iloc[0]
+        return row.iloc[0], None, None, None
 
 
 def make_processor(**kwargs) -> ConcreteProcessor:
@@ -33,6 +33,15 @@ class TestProcessorConstants:
 
     def test_output_col_value(self):
         assert ConcreteProcessor.OUTPUT_COL == "value"
+
+    def test_cost_col_value(self):
+        assert Processor.COST_COL == "cost"
+
+    def test_input_tokens_col_value(self):
+        assert Processor.INPUT_TOKENS_COL == "input_tokens"
+
+    def test_output_tokens_col_value(self):
+        assert Processor.OUTPUT_TOKENS_COL == "output_tokens"
 
 
 class TestProcessorInterface:
@@ -168,7 +177,7 @@ class TestRun:
     def test_result_has_correct_columns(self):
         p = make_processor()
         p.run()
-        assert list(p.result.columns) == [ConcreteProcessor.OUTPUT_COL, Processor.ERROR_COL]
+        assert list(p.result.columns) == [ConcreteProcessor.OUTPUT_COL, Processor.ERROR_COL, Processor.DURATION_COL, Processor.COST_COL, Processor.INPUT_TOKENS_COL, Processor.OUTPUT_TOKENS_COL]
 
     def test_result_index_matches_df(self):
         df = pd.DataFrame({"review": ["a", "b", "c"]}, index=[10, 20, 30])
@@ -198,6 +207,138 @@ class TestRun:
         p._run_row = lambda _: (_ for _ in ()).throw(ValueError("fail"))
         with pytest.raises(ValueError, match="fail"):
             p.run(on_error="raise")
+
+
+class TestProcessorDuration:
+    def test_duration_column_present(self):
+        p = make_processor()
+        p.run()
+        assert Processor.DURATION_COL in p.result.columns
+
+    def test_duration_values_are_floats(self):
+        p = make_processor()
+        p.run()
+        assert p.result[Processor.DURATION_COL].dtype == float
+
+    def test_duration_values_are_positive(self):
+        p = make_processor()
+        p.run()
+        assert (p.result[Processor.DURATION_COL] >= 0).all()
+
+    def test_duration_is_none_for_failed_rows(self):
+        p = make_processor()
+        p._run_row = lambda _: (_ for _ in ()).throw(ValueError("fail"))
+        p.run()
+        assert p.result[Processor.DURATION_COL].isna().all()
+
+
+class TestProcessorStats:
+    def test_stats_is_none_before_run(self):
+        p = make_processor()
+        assert p.stats is None
+
+    def test_stats_is_dict_after_run(self):
+        p = make_processor()
+        p.run()
+        assert isinstance(p.stats, dict)
+
+    def test_stats_has_total_succeeded(self):
+        p = make_processor()
+        p.run()
+        assert "total_succeeded" in p.stats
+
+    def test_stats_has_total_failed(self):
+        p = make_processor()
+        p.run()
+        assert "total_failed" in p.stats
+
+    def test_total_succeeded_correct(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_succeeded"] == 3
+
+    def test_total_failed_correct(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_failed"] == 0
+
+    def test_total_failed_correct_on_error(self):
+        p = make_processor()
+        p._run_row = lambda _: (_ for _ in ()).throw(ValueError("fail"))
+        p.run()
+        assert p.stats["total_failed"] == 3
+        assert p.stats["total_succeeded"] == 0
+
+    def test_stats_has_total_duration(self):
+        p = make_processor()
+        p.run()
+        assert "total_duration" in p.stats
+
+    def test_total_duration_is_positive(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_duration"] >= 0
+
+    def test_stats_has_total_cost(self):
+        p = make_processor()
+        p.run()
+        assert "total_cost" in p.stats
+
+    def test_total_cost_is_none_when_no_cost_returned(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_cost"] is None
+
+    def test_stats_has_total_input_tokens(self):
+        p = make_processor()
+        p.run()
+        assert "total_input_tokens" in p.stats
+
+    def test_stats_has_total_output_tokens(self):
+        p = make_processor()
+        p.run()
+        assert "total_output_tokens" in p.stats
+
+    def test_total_input_tokens_is_none_when_not_returned(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_input_tokens"] is None
+
+    def test_total_output_tokens_is_none_when_not_returned(self):
+        p = make_processor()
+        p.run()
+        assert p.stats["total_output_tokens"] is None
+
+
+class TestEstimateStats:
+    def test_raises_before_run(self):
+        p = make_processor()
+        with pytest.raises(RuntimeError):
+            p.estimate_stats()
+
+    def test_returns_dict(self):
+        p = make_processor()
+        p.run(n=2)
+        assert isinstance(p.estimate_stats(), dict)
+
+    def test_has_all_keys(self):
+        p = make_processor()
+        p.run(n=2)
+        result = p.estimate_stats()
+        assert set(result.keys()) == {"total_succeeded", "total_failed", "total_duration", "total_cost", "total_input_tokens", "total_output_tokens"}
+
+    def test_full_run_matches_stats(self):
+        p = make_processor()
+        p.run()
+        result = p.estimate_stats()
+        assert result["total_succeeded"] == p.stats["total_succeeded"]
+        assert result["total_failed"] == p.stats["total_failed"]
+
+    def test_invalid_max_workers_raises(self):
+        p = make_processor()
+        p.run(n=2)
+        with pytest.raises(ValueError, match="'max_workers'"):
+            p.estimate_stats(max_workers=0)
 
 
 class TestGetSummary:
@@ -232,7 +373,7 @@ class TestRunSummary:
         def fail_first(row):
             if row.name == 0:
                 raise ValueError("boom")
-            return row.iloc[0]
+            return row.iloc[0], None, None, None
 
         p = ConcreteProcessor(df=make_df(), model=MagicMock())
         p._run_row = fail_first

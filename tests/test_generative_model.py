@@ -174,33 +174,33 @@ class TestGenerativeModelGenerate:
 
 
 class TestGenerativeModelGenerateStructured:
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_returns_pydantic_instance(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5")
         result = model.generate_structured(system_prompt="Classify", user_prompt="{}", response_format=Sentiment)
         assert isinstance(result, Sentiment)
         assert result.label == "positive"
 
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_response_model_passed_to_instructor(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5")
         model.generate_structured(system_prompt="Classify", user_prompt="{}", response_format=Sentiment)
         assert mock_create.call_args.kwargs["response_model"] is Sentiment
 
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_system_message_is_system_prompt(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5")
         model.generate_structured(system_prompt="Classify the review", user_prompt="{}", response_format=Sentiment)
         messages = mock_create.call_args.kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "Classify the review"
 
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_user_message_is_user_prompt(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5")
         model.generate_structured(system_prompt="Classify", user_prompt='{"review": "Great!"}', response_format=Sentiment)
         messages = mock_create.call_args.kwargs["messages"]
@@ -212,9 +212,9 @@ class TestGenerativeModelGenerateStructured:
         with pytest.raises(ValueError, match="'system_prompt'"):
             model.generate_structured(system_prompt="   ", user_prompt="{}", response_format=Sentiment)
 
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_passes_correct_params(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5", temperature=0.5, max_tokens=500, top_p=0.9, seed=42)
         model.generate_structured(system_prompt="Classify", user_prompt="{}", response_format=Sentiment)
         kwargs = mock_create.call_args.kwargs
@@ -224,9 +224,9 @@ class TestGenerativeModelGenerateStructured:
         assert kwargs["top_p"] == 0.9
         assert kwargs["seed"] == 42
 
-    @patch("homogene.models.generative_model._instructor_client.chat.completions.create")
+    @patch("homogene.models.generative_model._instructor_client.chat.completions.create_with_completion")
     def test_api_key_passed(self, mock_create):
-        mock_create.return_value = Sentiment(label="positive")
+        mock_create.return_value = (Sentiment(label="positive"), MagicMock())
         model = GenerativeModel("gpt-5.5", api_key="sk-direct")
         model.generate_structured(system_prompt="Classify", user_prompt="{}", response_format=Sentiment)
         assert mock_create.call_args.kwargs["api_key"] == "sk-direct"

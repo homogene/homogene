@@ -20,7 +20,7 @@ def make_df() -> pd.DataFrame:
 
 def make_model(response: str = "positive") -> MagicMock:
     m = MagicMock()
-    m.generate.return_value = response
+    m._generate.return_value = (response, None, None, None)
     return m
 
 
@@ -143,7 +143,7 @@ class TestGeneratorRun:
         model = make_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.run(n=2)
-        assert model.generate.call_count == 2
+        assert model._generate.call_count == 2
 
     def test_run_with_n_stores_result(self):
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=make_model())
@@ -154,12 +154,12 @@ class TestGeneratorRun:
         model = make_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.run()
-        assert model.generate.call_count == 3
+        assert model._generate.call_count == 3
 
     def test_run_passes_correct_instruction(self):
         captured = []
         model = MagicMock()
-        model.generate.side_effect = lambda system_prompt, user_prompt: captured.append(system_prompt) or "positive"
+        model._generate.side_effect = lambda system_prompt, user_prompt: captured.append(system_prompt) or ("positive", None, None, None)
 
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.run()
@@ -168,7 +168,7 @@ class TestGeneratorRun:
     def test_run_passes_correct_context(self):
         captured = []
         model = MagicMock()
-        model.generate.side_effect = lambda system_prompt, user_prompt: captured.append(user_prompt) or "positive"
+        model._generate.side_effect = lambda system_prompt, user_prompt: captured.append(user_prompt) or ("positive", None, None, None)
 
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.run()
@@ -183,7 +183,7 @@ class TestGeneratorRun:
     def test_result_has_correct_columns(self):
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=make_model())
         generator.run()
-        assert list(generator.result.columns) == [Generator.OUTPUT_COL, Processor.ERROR_COL]
+        assert list(generator.result.columns) == [Generator.OUTPUT_COL, Processor.ERROR_COL, Processor.DURATION_COL, Processor.COST_COL, Processor.INPUT_TOKENS_COL, Processor.OUTPUT_TOKENS_COL]
 
     def test_result_index_matches_df_index(self):
         df = make_df()
@@ -202,6 +202,27 @@ class TestGeneratorRun:
         generator = Generator(df=df, columns=["review"], instruction="Fix the review", model=make_model("pos"))
         result = generator.run()
         assert list(result.index) == [2, 0, 1]
+
+
+class TestGeneratorGetPromptLength:
+    def test_returns_int(self):
+        generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=make_model())
+        assert isinstance(generator._get_prompt_length(make_df().iloc[0]), int)
+
+    def test_length_is_positive(self):
+        generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=make_model())
+        assert generator._get_prompt_length(make_df().iloc[0]) > 0
+
+    def test_longer_row_gives_longer_length(self):
+        generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=make_model())
+        short = generator._get_prompt_length(pd.Series({"review": "ok", "product": "x"}))
+        long = generator._get_prompt_length(pd.Series({"review": "A very long review " * 20, "product": "x"}))
+        assert long > short
+
+    def test_includes_instruction(self):
+        g1 = Generator(df=make_df(), columns=["review"], instruction="Short", model=make_model())
+        g2 = Generator(df=make_df(), columns=["review"], instruction="A much longer instruction " * 10, model=make_model())
+        assert g2._get_prompt_length(make_df().iloc[0]) > g1._get_prompt_length(make_df().iloc[0])
 
 
 class TestGeneratorGetPrompt:
@@ -230,7 +251,7 @@ class TestGeneratorGetPrompt:
         model = make_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.get_prompt(0)
-        model.generate.assert_not_called()
+        model._generate.assert_not_called()
 
     def test_multiple_columns_in_prompt(self):
         generator = Generator(df=make_df(), columns=["review", "product"], instruction="Fix the review", model=make_model())
@@ -345,7 +366,7 @@ class Sentiment(BaseModel):
 
 def make_schema_model() -> GenerativeModel:
     model = GenerativeModel("gpt-5.5")
-    model.generate_structured = MagicMock(return_value=Sentiment(label="positive"))
+    model._generate_structured = MagicMock(return_value=(Sentiment(label="positive"), None, None, None))
     return model
 
 
@@ -372,7 +393,7 @@ class TestGeneratorOutputSchema:
         model = make_schema_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model, output_schema=Sentiment)
         generator.run()
-        assert model.generate_structured.call_count == 3
+        assert model._generate_structured.call_count == 3
 
     def test_returns_typed_instances(self):
         model = make_schema_model()
@@ -384,34 +405,34 @@ class TestGeneratorOutputSchema:
         model = make_schema_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model, output_schema=Sentiment)
         generator.run()
-        call_kwargs = model.generate_structured.call_args_list[0].kwargs
+        call_kwargs = model._generate_structured.call_args_list[0].kwargs
         assert call_kwargs["response_format"] is Sentiment
 
     def test_without_schema_calls_generate(self):
         model = make_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model)
         generator.run()
-        assert model.generate.call_count == 3
-        model.generate_structured.assert_not_called()
+        assert model._generate.call_count == 3
+        model._generate_structured.assert_not_called()
 
     def test_passes_correct_instruction(self):
         model = make_schema_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model, output_schema=Sentiment)
         generator.run()
-        call_kwargs = model.generate_structured.call_args_list[0].kwargs
+        call_kwargs = model._generate_structured.call_args_list[0].kwargs
         assert call_kwargs["system_prompt"] == "Fix the review"
 
     def test_passes_correct_context(self):
         model = make_schema_model()
         generator = Generator(df=make_df(), columns=["review"], instruction="Fix the review", model=model, output_schema=Sentiment)
         generator.run()
-        user_prompts = [c.kwargs["user_prompt"] for c in model.generate_structured.call_args_list]
+        user_prompts = [c.kwargs["user_prompt"] for c in model._generate_structured.call_args_list]
         assert any("Great!" in ctx for ctx in user_prompts)
 
 
 def make_failing_model() -> MagicMock:
     m = MagicMock()
-    m.generate.side_effect = ValueError("API timeout")
+    m._generate.side_effect = ValueError("API timeout")
     return m
 
 

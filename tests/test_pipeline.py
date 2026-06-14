@@ -15,34 +15,38 @@ def make_df() -> pd.DataFrame:
     })
 
 
-def upper_fn(row: pd.Series) -> str:
-    return row["text"].upper()
+def upper_fn(row: pd.Series) -> tuple:
+    return row["text"].upper(), None, None, None
 
 
-def failing_fn(row: pd.Series) -> str:
+def failing_fn(row: pd.Series) -> tuple:
     raise ValueError(f"Failed on {row['text']}")
 
 
-def partial_failing_fn(row: pd.Series) -> str:
+def partial_failing_fn(row: pd.Series) -> tuple:
     if row["text"] == "b":
         raise ValueError("bad row")
-    return row["text"].upper()
+    return row["text"].upper(), None, None, None
 
 
 OUTPUT_COL = "value"
 ERROR_COL = "error"
+DURATION_COL = "duration"
+COST_COL = "cost"
+INPUT_TOKENS_COL = "input_tokens"
+OUTPUT_TOKENS_COL = "output_tokens"
 
 
 def rr(df, func, **kwargs):
     """Shorthand that injects default column names for pipeline tests."""
-    return _run_pipeline(df, func, output_col=OUTPUT_COL, error_col=ERROR_COL, **kwargs)
+    return _run_pipeline(df, func, output_col=OUTPUT_COL, error_col=ERROR_COL, duration_col=DURATION_COL, cost_col=COST_COL, input_tokens_col=INPUT_TOKENS_COL, output_tokens_col=OUTPUT_TOKENS_COL, **kwargs)
 
 
 class TestRunRows:
     def test_returns_dataframe(self):
         result = rr(make_df(), upper_fn, progress=False)
         assert isinstance(result, pd.DataFrame)
-        assert list(result.columns) == [OUTPUT_COL, ERROR_COL]
+        assert list(result.columns) == [OUTPUT_COL, ERROR_COL, DURATION_COL, COST_COL, INPUT_TOKENS_COL, OUTPUT_TOKENS_COL]
 
     def test_correct_values(self):
         result = rr(make_df(), upper_fn, progress=False)
@@ -78,13 +82,13 @@ class TestRunRows:
 
     def test_empty_dataframe(self):
         df = pd.DataFrame({"text": []})
-        result = rr(df, lambda row: row["text"], progress=False)
+        result = rr(df, lambda row: (row["text"], None, None, None), progress=False)
         assert len(result) == 0
-        assert list(result.columns) == [OUTPUT_COL, ERROR_COL]
+        assert list(result.columns) == [OUTPUT_COL, ERROR_COL, DURATION_COL, COST_COL, INPUT_TOKENS_COL, OUTPUT_TOKENS_COL]
 
     def test_custom_column_names(self):
-        result = _run_pipeline(make_df(), upper_fn, output_col="generation", error_col="error", progress=False)
-        assert list(result.columns) == ["generation", "error"]
+        result = _run_pipeline(make_df(), upper_fn, output_col="generation", error_col="error", duration_col="duration", cost_col="cost", input_tokens_col="input_tokens", output_tokens_col="output_tokens", progress=False)
+        assert list(result.columns) == ["generation", "error", "duration", "cost", "input_tokens", "output_tokens"]
 
 
 class TestRunRowsErrorHandling:
@@ -128,7 +132,7 @@ class TestRunRowsParallelism:
 
         def slow_fn(row):
             time.sleep(0.3)
-            return row["x"]
+            return row["x"], None, None, None
 
         start = time.time()
         rr(df, slow_fn, max_workers=20, progress=False)
@@ -142,7 +146,7 @@ class TestRunRowsParallelism:
 
         def slow_fn(row):
             time.sleep(0.3)
-            return row["x"]
+            return row["x"], None, None, None
 
         start = time.time()
         rr(df, slow_fn, max_workers=1, progress=False)
@@ -156,7 +160,7 @@ class TestRunRowsParallelism:
 
         def slow_fn(row):
             time.sleep(0.3)
-            return row["x"]
+            return row["x"], None, None, None
 
         start = time.time()
         rr(df, slow_fn, max_workers=1, progress=False)
@@ -190,7 +194,7 @@ class TestRunRowsOnStep:
         rr(make_df(), upper_fn, max_workers=1, progress=False,
            on_step=lambda partial_df: snapshots.append(partial_df.copy()), step=1)
         assert all(isinstance(s, pd.DataFrame) for s in snapshots)
-        assert all(list(s.columns) == [OUTPUT_COL, ERROR_COL] for s in snapshots)
+        assert all(list(s.columns) == [OUTPUT_COL, ERROR_COL, DURATION_COL, COST_COL, INPUT_TOKENS_COL, OUTPUT_TOKENS_COL] for s in snapshots)
 
     def test_on_step_not_called_when_step_is_zero(self):
         calls = []
